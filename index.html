@@ -1,1 +1,115 @@
-<!DOCTYPE html><html><head><title>Battle City 3D</title></head><body><canvas id="gameCanvas"></canvas><script src="main.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battle City 3D</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Press Start 2P', cursive;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #menu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #fff;
+            z-index: 100;
+        }
+        button {
+            background: #333;
+            border: 2px solid #666;
+            color: #fff;
+            padding: 10px 20px;
+            margin: 10px;
+            font-family: 'Press Start 2P', cursive;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            background: #444;
+            border-color: #888;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+            z-index: 100;
+        }
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: #fff;
+        }
+        #crosshair::before {
+            width: 2px;
+            height: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        #crosshair::after {
+            width: 20px;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            text-align: center;
+            font-size: 12px;
+            z-index: 100;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="game-container">
+        <div id="menu">
+            <h1>Battle City 3D</h1>
+            <button onclick="window.gameInstance.start('bomb')">5v5 Bomb Mode</button>
+        </div>
+        <div id="crosshair"></div>
+        <div id="controls">
+            WASD - Move | SPACE - Fire | F - Plant/Defuse Bomb
+        </div>
+    </div>
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    
+    <!-- Game Scripts -->
+    <script src="js/textureGenerator.js"></script>
+    <script src="js/effects.js"></script>
+    <script src="js/bullet.js"></script>
+    <script src="js/bomb.js"></script>
+    <script src="js/tank.js"></script>
+    <script src="js/botBehavior.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/game.js"></script>
+    <script>
+        // Initialize game instance after all scripts are loaded
+        window.gameInstance = new Game();
+    </script>
+    <script src="js/main.js"></script>
+</body>
+</html>
