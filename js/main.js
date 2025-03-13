@@ -1,3 +1,7 @@
+// Initialize game instance
+let gameInstance = null;
+window.gameInstance = null; // Add global reference
+
 // Initialize socket connection
 const socket = io();
 
@@ -15,13 +19,17 @@ const gameState = {
 
 // Start game function
 function startGame(mode) {
-    window.gameInstance.start(mode);
+    if (!gameInstance) {
+        gameInstance = new Game();
+        window.gameInstance = gameInstance; // Update global reference
+    }
+    gameInstance.start(mode);
     
     // Sync game state
     gameState.mode = mode;
-    gameState.map = window.gameInstance.map;
-    gameState.playerTank = window.gameInstance.playerTank;
-    gameState.playerTeam = window.gameInstance.playerTank.team;
+    gameState.map = gameInstance.map;
+    gameState.playerTank = gameInstance.playerTank;
+    gameState.playerTeam = gameInstance.playerTank.team;
 }
 
 // Socket event handlers
@@ -54,7 +62,7 @@ socket.on('tankFire', (data) => {
         const player = gameState.players.get(data.id);
         if (player) {
             const bullet = new Bullet(data.bullet.position, data.bullet.rotation, data.bullet.team);
-            window.gameInstance.bullets.push(bullet);
+            gameInstance.bullets.push(bullet);
         }
     }
 });
@@ -69,13 +77,13 @@ socket.on('tankDestroyed', (data) => {
 socket.on('bombPlanted', (data) => {
     if (data.id !== socket.id) {
         const bomb = new Bomb(data.position, data.team);
-        window.gameInstance.bombs.push(bomb);
+        gameInstance.bombs.push(bomb);
     }
 });
 
 socket.on('bombDefused', (data) => {
     if (data.id !== socket.id) {
-        const bomb = window.gameInstance.bombs.find(b => b.position.equals(data.position));
+        const bomb = gameInstance.bombs.find(b => b.position.equals(data.position));
         if (bomb) {
             bomb.defuse();
         }
@@ -83,7 +91,7 @@ socket.on('bombDefused', (data) => {
 });
 
 socket.on('bombExploded', (data) => {
-    const bomb = window.gameInstance.bombs.find(b => b.position.equals(data.position));
+    const bomb = gameInstance.bombs.find(b => b.position.equals(data.position));
     if (bomb) {
         bomb.explode();
     }
@@ -145,7 +153,7 @@ document.addEventListener('keyup', (event) => {
 
 // Game loop
 function gameLoop() {
-    if (gameState.playerTank && window.gameInstance.gameStarted) {
+    if (gameState.playerTank && gameInstance.gameStarted) {
         // Handle player movement
         if (keys.forward) {
             gameState.playerTank.move('forward');
@@ -173,26 +181,44 @@ function gameLoop() {
         }
         
         // Handle bomb planting
-        if (keys.plantBomb && window.gameInstance.mode === 'bomb') {
+        if (keys.plantBomb && gameInstance.mode === 'bomb') {
             const player = gameState.playerTank;
-            const bombSite = window.gameInstance.teams[player.team].bombSite;
-            if (bombSite) {
-                const distance = player.position.distanceTo(bombSite);
-                
-                if (distance < 3) { // Within 3 units of bomb site
-                    if (!gameState.bomb) {
-                        gameState.bomb = new Bomb(player.position.clone(), player.team);
-                        window.gameInstance.scene.add(gameState.bomb.mesh);
-                        window.gameInstance.bombs.push(gameState.bomb);
-                        if (gameState.bomb.plant()) {
-                            socket.emit('bombPlanted', {
-                                id: socket.id,
-                                position: player.position.clone(),
-                                team: player.team
-                            });
+            if (player.team === 'red' && gameInstance.bomb && gameInstance.bomb.carrier === player) {
+                const blueSite = gameInstance.teams.blue.bombSite;
+                if (blueSite) {
+                    const distance = player.position.distanceTo(blueSite);
+                    
+                    if (distance < 3) { // Within 3 units of bomb site
+                        if (!gameInstance.bomb.isPlanted) {
+                            if (!gameInstance.bomb.plantStartTime) {
+                                gameInstance.bomb.startPlanting(player);
+                                gameInstance.showBombAction('Planting Bomb...', 0);
+                            } else {
+                                const progress = gameInstance.bomb.continuePlanting();
+                                if (typeof progress === 'number') {
+                                    gameInstance.showBombAction('Planting Bomb...', progress);
+                                    if (progress >= 1) {
+                                        gameInstance.hideBombAction();
+                                        socket.emit('bombPlanted', {
+                                            id: socket.id,
+                                            position: player.position.clone(),
+                                            team: player.team
+                                        });
+                                    }
+                                }
+                            }
                         }
+                    } else {
+                        gameInstance.bomb.cancelAction();
+                        gameInstance.hideBombAction();
                     }
                 }
+            }
+        } else {
+            // Cancel bomb planting if F key is released
+            if (gameInstance.bomb) {
+                gameInstance.bomb.cancelAction();
+                gameInstance.hideBombAction();
             }
         }
     }
@@ -213,10 +239,10 @@ function gameLoop() {
 // Add player function
 function addPlayer(playerData) {
     const tank = new Tank(playerData.id, playerData.position, playerData.team);
-    window.gameInstance.scene.add(tank.mesh); // Add tank mesh to scene
+    gameInstance.scene.add(tank.mesh); // Add tank mesh to scene
     gameState.players.set(playerData.id, tank);
-    window.gameInstance.tanks.push(tank);
-    window.gameInstance.teams[playerData.team].players.push(tank);
+    gameInstance.tanks.push(tank);
+    gameInstance.teams[playerData.team].players.push(tank);
 
     // Add bot behavior for non-player tanks
     if (playerData.id !== socket.id) {
@@ -228,11 +254,11 @@ function addPlayer(playerData) {
 function removePlayer(playerId) {
     const player = gameState.players.get(playerId);
     if (player) {
-        window.gameInstance.scene.remove(player.mesh); // Remove tank mesh from scene
+        gameInstance.scene.remove(player.mesh); // Remove tank mesh from scene
         player.destroy();
         gameState.players.delete(playerId);
-        window.gameInstance.tanks = window.gameInstance.tanks.filter(t => t.id !== playerId);
-        window.gameInstance.teams[player.team].players = window.gameInstance.teams[player.team].players.filter(p => p.id !== playerId);
+        gameInstance.tanks = gameInstance.tanks.filter(t => t.id !== playerId);
+        gameInstance.teams[player.team].players = gameInstance.teams[player.team].players.filter(p => p.id !== playerId);
     }
 }
 

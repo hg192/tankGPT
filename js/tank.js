@@ -1,5 +1,5 @@
 class Tank {
-    constructor(position, team, isPlayer = false) {
+    constructor(position, team, isPlayer = false, playerName = '') {
         this.position = position;
         this.team = team;
         this.health = 100;
@@ -20,6 +20,15 @@ class Tank {
         this.isRotating = false;
         this.rotationDirection = 0;
         this.isPlayer = isPlayer;
+        this.lastFireTime = 0;
+        this.fireRate = 500; // Assuming a default fireRate
+        
+        // Add player name display
+        this.playerName = playerName;
+        this.nameLabel = null;
+        if (playerName) {
+            this.createNameLabel();
+        }
     }
 
     createMesh() {
@@ -94,24 +103,30 @@ class Tank {
     }
 
     fire() {
-        if (this.isDead) return;
-
-        const bulletData = {
-            tank: this,
-            team: this.team
-        };
-
-        addBullet(bulletData);
+        if (!this.isDead && this.lastFireTime + this.fireRate <= Date.now()) {
+            // Play firing sound
+            gameInstance.audio.playTankFire();
+            
+            // Create bullet
+            const bullet = new Bullet(this, this.team);
+            
+            // Add bullet to game
+            gameInstance.bullets.push(bullet);
+            gameInstance.scene.add(bullet.mesh);
+            
+            // Update last fire time
+            this.lastFireTime = Date.now();
+        }
     }
 
     takeDamage(amount) {
         if (this.isDead) return;
 
         this.health -= amount;
-        window.gameInstance.effects.createHitSpark(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)));
+        gameInstance.effects.createHitSpark(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)));
 
         if (this.health <= 50) {
-            window.gameInstance.effects.createSmoke(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)));
+            gameInstance.effects.createSmoke(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)));
         }
 
         if (this.health <= 0) {
@@ -121,13 +136,13 @@ class Tank {
 
     destroy() {
         this.isDead = true;
-        window.gameInstance.effects.createExplosion(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)));
+        gameInstance.effects.createExplosion(this.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)));
         
         setTimeout(() => {
-            window.gameInstance.scene.remove(this.mesh);
-            const index = window.gameInstance.tanks.indexOf(this);
+            gameInstance.scene.remove(this.mesh);
+            const index = gameInstance.tanks.indexOf(this);
             if (index > -1) {
-                window.gameInstance.tanks.splice(index, 1);
+                gameInstance.tanks.splice(index, 1);
             }
         }, 1000);
     }
@@ -151,7 +166,7 @@ class Tank {
         this.updateBoundingBox();
 
         // Check collision with map
-        if (window.gameInstance.map.checkCollision(this.mesh.position, 1.5)) {
+        if (gameInstance.map.checkCollision(this.mesh.position, 1.5)) {
             this.mesh.position.copy(oldPosition);
             this.mesh.rotation.y = oldRotation;
             this.velocity.set(0, 0, 0);
@@ -160,7 +175,7 @@ class Tank {
         }
 
         // Check collision with other tanks
-        for (const otherTank of window.gameInstance.tanks) {
+        for (const otherTank of gameInstance.tanks) {
             if (otherTank !== this && !otherTank.isDead) {
                 const distance = this.mesh.position.distanceTo(otherTank.mesh.position);
                 if (distance < 3) {
@@ -175,6 +190,39 @@ class Tank {
 
         // Apply friction
         this.velocity.multiplyScalar(this.friction);
+    }
+
+    createNameLabel() {
+        // Create canvas for text
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 64;
+
+        // Draw text with background
+        context.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        
+        context.fillStyle = 'white';
+        context.font = 'bold 32px Arial';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(this.playerName, canvas.width/2, canvas.height/2);
+
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        const material = new THREE.SpriteMaterial({ 
+            map: texture,
+            transparent: true,
+            depthTest: false
+        });
+        
+        // Create sprite
+        this.nameLabel = new THREE.Sprite(material);
+        this.nameLabel.scale.set(3, 0.75, 1);
+        this.nameLabel.position.y = 2.5; // Position above tank
+        this.mesh.add(this.nameLabel);
     }
 }
 

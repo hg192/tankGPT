@@ -1,168 +1,231 @@
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
-const io = require('socket.io')(http);
+const io = require('socket.io')(http, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+const fs = require('fs');
+const path = require('path');
 
 // Serve static files from the root directory
 app.use(express.static(__dirname));
 
-// Serve JavaScript files with correct MIME type
-app.use('/js', express.static(__dirname + '/js', {
-    setHeaders: (res, path) => {
-        if (path.endsWith('.js')) {
-            res.setHeader('Content-Type', 'application/javascript');
-        }
-    }
-}));
+// Serve Socket.IO client
+app.get('/socket.io/socket.io.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'node_modules/socket.io/client-dist/socket.io.js'));
+});
 
 // Game state
 const gameState = {
     players: new Map(),
-    rooms: new Map(),
-    nextPlayerId: 1
+    tanks: [],
+    bullets: [],
+    teams: {
+        red: { players: [], score: 0 },
+        blue: { players: [], score: 0 }
+    }
 };
 
-// Socket.IO connection handling
+// Lobby state
+const lobbyState = {
+    players: {
+        red: [],
+        blue: []
+    },
+    gameStarted: false
+};
+
+// Handle socket connections
 io.on('connection', (socket) => {
-    console.log('A user connected');
+    console.log('New client connected');
+    let playerId = null;
+    let playerName = '';
+    let playerTeam = null;
 
-    // Handle player joining
-    socket.on('join', (data) => {
-        const playerData = {
-            id: socket.id,
+    socket.on('join_lobby', (data) => {
+        console.log('Player joined lobby:', data);
+        playerName = data.playerName;
+        playerId = generatePlayerId();
+        
+        // Send initial lobby state
+        socket.emit('lobby_state', {
+            state: lobbyState,
+            playerId: playerId
+        });
+        console.log('Sent initial lobby state:', lobbyState);
+    });
+
+    socket.on('select_team', (data) => {
+        console.log('Team selection:', data);
+        if (!playerId) {
+            console.log('No player ID found');
+            return;
+        }
+
+        const team = data.team;
+        if (!['red', 'blue'].includes(team)) {
+            console.log('Invalid team selected');
+            return;
+        }
+
+        // Remove player from current team if any
+        if (playerTeam) {
+            lobbyState.players[playerTeam] = lobbyState.players[playerTeam].filter(p => p.id !== playerId);
+        }
+
+        // Add player to new team
+        playerTeam = team;
+        lobbyState.players[team].push({
+            id: playerId,
+            name: playerName,
+            ready: false
+        });
+
+        console.log('Updated lobby state:', lobbyState);
+        io.emit('lobby_state', { state: lobbyState });
+    });
+
+    socket.on('player_ready', () => {
+        console.log('Player ready:', playerId);
+        if (!playerId || !playerTeam) {
+            console.log('No player ID or team found');
+            return;
+        }
+
+        const player = lobbyState.players[playerTeam].find(p => p.id === playerId);
+        if (player) {
+            player.ready = true;
+            console.log('Updated player ready status:', player);
+            io.emit('lobby_state', { state: lobbyState });
+
+            // Check if all players are ready
+            if (canStartGame()) {
+                console.log('All players ready, starting game');
+                startGame();
+            }
+        }
+    });
+
+    socket.on('start_game', () => {
+        if (!lobbyState.gameStarted && canStartGame()) {
+            startGame();
+        }
+    });
+
+    socket.on('player_update', (data) => {
+        const player = gameState.players.get(playerId);
+        if (!player) return;
+
+        player.position = data.position;
+        player.rotation = data.rotation;
+
+        io.emit('game_state', { state: gameState });
+    });
+
+    socket.on('projectile_fired', (data) => {
+        const player = gameState.players.get(playerId);
+        if (!player) return;
+
+        const projectile = {
+            id: generateProjectileId(),
+            playerId: playerId,
             position: data.position,
-            team: data.team
+            direction: data.direction,
+            team: player.team
         };
-        socket.broadcast.emit('playerJoined', playerData);
+
+        gameState.bullets.push(projectile);
+        io.emit('game_state', { state: gameState });
     });
 
-    // Handle tank movement
-    socket.on('tankMove', (data) => {
-        socket.broadcast.emit('tankMove', data);
-    });
-
-    // Handle tank firing
-    socket.on('tankFire', (data) => {
-        socket.broadcast.emit('tankFire', data);
-    });
-
-    // Handle tank destruction
-    socket.on('tankDestroyed', (data) => {
-        socket.broadcast.emit('tankDestroyed', data);
-    });
-
-    // Handle disconnection
     socket.on('disconnect', () => {
-        console.log('User disconnected');
-        io.emit('playerLeft', socket.id);
+        console.log('Client disconnected:', playerId);
+        if (playerId) {
+            // Remove player from game state
+            gameState.players.delete(playerId);
+            
+            // Remove player from lobby state
+            if (playerTeam) {
+                lobbyState.players[playerTeam] = lobbyState.players[playerTeam].filter(p => p.id !== playerId);
+            }
+
+            // Broadcast updated states
+            io.emit('lobby_state', { state: lobbyState });
+            io.emit('game_state', { state: gameState });
+        }
     });
+
+    function canStartGame() {
+        return lobbyState.players.red.length > 0 && 
+               lobbyState.players.blue.length > 0 &&
+               lobbyState.players.red.every(p => p.ready) &&
+               lobbyState.players.blue.every(p => p.ready);
+    }
+
+    function startGame() {
+        lobbyState.gameStarted = true;
+        
+        // Initialize game state
+        gameState.players.clear();
+        gameState.tanks = [];
+        gameState.bullets = [];
+        gameState.teams = {
+            red: { players: [], score: 0 },
+            blue: { players: [], score: 0 }
+        };
+
+        // Add players to game state
+        Object.entries(lobbyState.players).forEach(([team, players]) => {
+            players.forEach(player => {
+                gameState.players.set(player.id, {
+                    name: player.name,
+                    team: team,
+                    position: getSpawnPosition(team)
+                });
+                gameState.teams[team].players.push(player.id);
+            });
+        });
+
+        // Broadcast game start to all clients
+        io.emit('game_start', { gameState: gameState });
+    }
+
+    function generatePlayerId() {
+        return Math.random().toString(36).substr(2, 9);
+    }
+
+    function generateProjectileId() {
+        return Math.random().toString(36).substr(2, 9);
+    }
+
+    function getSpawnPosition(team) {
+        const spawnPoints = {
+            red: [
+                { x: -40, z: -40 },
+                { x: -40, z: -30 },
+                { x: -30, z: -40 }
+            ],
+            blue: [
+                { x: 40, z: 40 },
+                { x: 40, z: 30 },
+                { x: 30, z: 40 }
+            ]
+        };
+
+        const points = spawnPoints[team];
+        const randomPoint = points[Math.floor(Math.random() * points.length)];
+        return {
+            x: randomPoint.x,
+            y: 0,
+            z: randomPoint.z
+        };
+    }
 });
 
-// Join bomb mode room
-function joinBombMode(player) {
-    let room = null;
-    
-    // Find available room or create new one
-    for (const [roomId, roomData] of gameState.rooms) {
-        if (roomData.mode === 'bomb' && roomData.players.length < 10) {
-            room = roomId;
-            break;
-        }
-    }
-    
-    if (!room) {
-        room = `bomb_${Date.now()}`;
-        gameState.rooms.set(room, {
-            mode: 'bomb',
-            players: [],
-            redTeam: [],
-            blueTeam: []
-        });
-    }
-    
-    // Assign team
-    const roomData = gameState.rooms.get(room);
-    if (roomData.redTeam.length <= roomData.blueTeam.length) {
-        player.team = 'red';
-        roomData.redTeam.push(player.id);
-    } else {
-        player.team = 'blue';
-        roomData.blueTeam.push(player.id);
-    }
-    
-    // Join room
-    player.socket.join(room);
-    player.room = room;
-    roomData.players.push(player.id);
-    
-    // Broadcast player joined
-    player.socket.to(room).emit('playerJoined', {
-        id: player.id,
-        position: player.position,
-        rotation: player.rotation,
-        team: player.team
-    });
-}
-
-// Join battle mode room
-function joinBattleMode(player) {
-    let room = null;
-    
-    // Find available room or create new one
-    for (const [roomId, roomData] of gameState.rooms) {
-        if (roomData.mode === 'battle' && roomData.players.length < 20) {
-            room = roomId;
-            break;
-        }
-    }
-    
-    if (!room) {
-        room = `battle_${Date.now()}`;
-        gameState.rooms.set(room, {
-            mode: 'battle',
-            players: []
-        });
-    }
-    
-    // Join room
-    player.socket.join(room);
-    player.room = room;
-    gameState.rooms.get(room).players.push(player.id);
-    
-    // Broadcast player joined
-    player.socket.to(room).emit('playerJoined', {
-        id: player.id,
-        position: player.position,
-        rotation: player.rotation
-    });
-}
-
-// Check game end conditions
-function checkGameEnd(roomId) {
-    const room = gameState.rooms.get(roomId);
-    if (!room) return;
-    
-    if (room.mode === 'bomb') {
-        // Check if one team is eliminated
-        if (room.redTeam.length === 0) {
-            io.to(roomId).emit('gameEnd', { winner: 'blue' });
-            gameState.rooms.delete(roomId);
-        } else if (room.blueTeam.length === 0) {
-            io.to(roomId).emit('gameEnd', { winner: 'red' });
-            gameState.rooms.delete(roomId);
-        }
-    } else {
-        // Battle mode: check if only one player remains
-        const alivePlayers = room.players.filter(id => gameState.players.has(id));
-        if (alivePlayers.length <= 1) {
-            io.to(roomId).emit('gameEnd', { winner: alivePlayers[0] });
-            gameState.rooms.delete(roomId);
-        }
-    }
-}
-
-// Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 http.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 }); 

@@ -4,6 +4,13 @@ class Game {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
         
+        // Initialize audio manager
+        this.audio = new AudioManager();
+        
+        // Initialize network manager
+        this.network = new NetworkManager(this);
+        this.network.connect();
+        
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.camera.position.set(0, 10, 20); // Set initial camera position
         this.camera.lookAt(0, 0, 0);
@@ -206,14 +213,77 @@ class Game {
 
         document.body.appendChild(this.winLosePopup);
 
+        // Add explosion effect
+        this.explosionEffect = null;
+
         // Start render loop
+        this.animate();
+
+        this.playerName = '';
+    }
+
+    initialize(gameState) {
+        // Clear existing tanks and projectiles
+        this.tanks.forEach(tank => {
+            this.scene.remove(tank.mesh);
+        });
+        this.tanks = [];
+        this.bullets = [];
+        this.bombs = [];
+        this.map = null;
+        this.mode = null;
+        this.gameStarted = false;
+        this.gameActive = false;
+        this.teams = gameState.teams;
+        this.playerTank = null;
+
+        // Create tanks for all players
+        Object.entries(gameState.players).forEach(([id, player]) => {
+            const tank = new Tank(player.position, player.team);
+            tank.id = id;
+            tank.name = player.name;
+            this.tanks.push(tank);
+            this.scene.add(tank.mesh);
+
+            // Set up player tank if this is the local player
+            if (id === localStorage.getItem('playerId')) {
+                this.playerTank = tank;
+                this.setupPlayerCamera();
+            }
+        });
+
+        // Start game loop
         this.animate();
     }
 
-    start(mode) {
+    updateState(state) {
+        // Update tanks
+        Object.entries(state.players).forEach(([id, player]) => {
+            const tank = this.tanks.find(t => t.id === id);
+            if (tank) {
+                tank.mesh.position.set(player.position.x, player.position.y, player.position.z);
+                tank.mesh.rotation.y = player.rotation;
+            }
+        });
+
+        // Update projectiles
+        this.bullets = state.projectiles.map(proj => {
+            const projectile = new Projectile(proj.position, proj.direction, proj.team);
+            this.scene.add(projectile.mesh);
+            return projectile;
+        });
+
+        // Update scores
+        this.teams = state.teams;
+        document.getElementById('red-score').textContent = this.teams.red.score;
+        document.getElementById('blue-score').textContent = this.teams.blue.score;
+    }
+
+    start(mode, playerName) {
         this.mode = mode;
         this.gameStarted = true;
         this.gameActive = false;
+        this.playerName = playerName;
         this.clearGame();
         
         // Create map with obstacles first
@@ -225,58 +295,45 @@ class Game {
             const playerTeam = mode === 'bomb' ? 'red' : (Math.random() < 0.5 ? 'red' : 'blue');
             const enemyTeam = playerTeam === 'red' ? 'blue' : 'red';
             
+            // Initialize teams first
+            this.teams = {
+                red: { players: [], bombSite: null },
+                blue: { players: [], bombSite: null }
+            };
+            
             // Create player tank at team spawn position
             const playerSpawnPos = this.getSpawnPosition(playerTeam);
-            const playerTank = new Tank(playerSpawnPos, playerTeam);
+            const playerTank = new Tank(playerSpawnPos, playerTeam, true, this.playerName);
             this.tanks.push(playerTank);
             this.scene.add(playerTank.mesh);
             this.setPlayerTank(playerTank);
             this.teams[playerTeam].players.push(playerTank);
-            
-            // Add bot teammates with delay to prevent spawn conflicts
-            const addTeammate = (index) => {
-                if (index < 4) {
-                    const teammatePos = this.getSpawnPosition(playerTeam);
-                    const teammate = new Tank(teammatePos, playerTeam);
-                    teammate.behavior = new BotBehavior(teammate, playerTeam);
-                    this.tanks.push(teammate);
-                    this.scene.add(teammate.mesh);
-                    this.teams[playerTeam].players.push(teammate);
-                    
-                    // Add next teammate after a short delay
-                    setTimeout(() => addTeammate(index + 1), 50);
-                }
-            };
-            
-            // Add enemy bots with delay
-            const addEnemy = (index) => {
-                if (index < 5) {
-                    const enemyPos = this.getSpawnPosition(enemyTeam);
-                    const enemy = new Tank(enemyPos, enemyTeam);
-                    enemy.behavior = new BotBehavior(enemy, enemyTeam);
-                    this.tanks.push(enemy);
-                    this.scene.add(enemy.mesh);
-                    this.teams[enemyTeam].players.push(enemy);
-                    
-                    // Add next enemy after a short delay
-                    setTimeout(() => addEnemy(index + 1), 50);
-                }
-            };
-            
-            // Start adding bots with delays
-            addTeammate(0);
-            addEnemy(0);
-            
-            // Set up bomb sites for bomb mode
+
+            // Add follower bot that always follows the player
+            const followerBotPos = this.getSpawnPosition(playerTeam);
+            const followerBot = new Tank(followerBotPos, playerTeam);
+            followerBot.behavior = new BotBehavior(followerBot, playerTeam);
+            followerBot.behavior.gameInstance = this;
+            followerBot.behavior.isFollower = true; // Mark this bot as a follower
+            followerBot.behavior.followTarget = playerTank; // Set player as target to follow
+            this.tanks.push(followerBot);
+            this.scene.add(followerBot.mesh);
+            this.teams[playerTeam].players.push(followerBot);
+
+            // Join game through network
+            this.network.joinGame(playerTeam);
+
+            // Initialize bomb for bomb mode
             if (mode === 'bomb') {
-                // Create larger bomb sites
+                this.bomb = new Bomb();
+                // Set up bomb sites first
                 const redSite = new THREE.Vector3(-35, 0, -35);
                 const blueSite = new THREE.Vector3(35, 0, 35);
                 
                 this.teams.red.bombSite = redSite;
                 this.teams.blue.bombSite = blueSite;
                 
-                // Add visual markers for bomb sites (larger radius)
+                // Add visual markers for bomb sites
                 const siteGeometry = new THREE.CylinderGeometry(5, 5, 0.1, 32);
                 
                 const redMaterial = new THREE.MeshPhongMaterial({ 
@@ -297,17 +354,46 @@ class Game {
                 blueSiteMesh.position.copy(blueSite);
                 this.scene.add(blueSiteMesh);
 
-                // Create and assign bomb to player if on red team
-                this.bomb = new Bomb();
-                if (playerTeam === 'red') {
-                    this.bomb.carrier = this.playerTank;
-                    this.playerTank.hasBomb = true;
-                    this.bomb.mesh.position.copy(this.playerTank.mesh.position);
-                    this.bomb.mesh.position.y = 1;
-                    this.scene.add(this.bomb.mesh);
-                }
+                // Now assign bomb to random red player
+                this.bomb.assignToRandomRedPlayer();
             }
-
+            
+            // Add bot teammates with delay to prevent spawn conflicts
+            const addTeammate = (index) => {
+                if (index < 4) {
+                    const teammatePos = this.getSpawnPosition(playerTeam);
+                    const teammate = new Tank(teammatePos, playerTeam);
+                    teammate.behavior = new BotBehavior(teammate, playerTeam);
+                    teammate.behavior.gameInstance = this;
+                    this.tanks.push(teammate);
+                    this.scene.add(teammate.mesh);
+                    this.teams[playerTeam].players.push(teammate);
+                    
+                    // Add next teammate after a short delay
+                    setTimeout(() => addTeammate(index + 1), 50);
+                }
+            };
+            
+            // Add enemy bots with delay
+            const addEnemy = (index) => {
+                if (index < 5) {
+                    const enemyPos = this.getSpawnPosition(enemyTeam);
+                    const enemy = new Tank(enemyPos, enemyTeam);
+                    enemy.behavior = new BotBehavior(enemy, enemyTeam);
+                    enemy.behavior.gameInstance = this;
+                    this.tanks.push(enemy);
+                    this.scene.add(enemy.mesh);
+                    this.teams[enemyTeam].players.push(enemy);
+                    
+                    // Add next enemy after a short delay
+                    setTimeout(() => addEnemy(index + 1), 50);
+                }
+            };
+            
+            // Start adding bots with delays
+            addTeammate(0);
+            addEnemy(0);
+            
             // Start countdown
             this.startCountdown();
             
@@ -493,11 +579,8 @@ class Game {
                 case 'Space':
                     this.playerTank.fire();
                     break;
-                case 'KeyE':
-                    keyState.plant = true;
-                    break;
                 case 'KeyF':
-                    keyState.defuse = true;
+                    keyState.plant = true;
                     break;
             }
         });
@@ -518,11 +601,8 @@ class Game {
                     keyState.right = false;
                     this.playerTank.move('stop_right');
                     break;
-                case 'KeyE':
-                    keyState.plant = false;
-                    break;
                 case 'KeyF':
-                    keyState.defuse = false;
+                    keyState.plant = false;
                     break;
             }
         });
@@ -579,6 +659,9 @@ class Game {
         if (tank && !tank.isDead) {
             tank.health -= damage;
             
+            // Play hit sound
+            this.audio.playBulletHit();
+            
             // Create hit effect
             this.effects.createHitSpark(tank.mesh.position.clone());
             
@@ -592,9 +675,12 @@ class Game {
                 }, 100);
             }
             
-            // Create smoke if health is low
+            // Create smoke and play low health sound if health is low
             if (tank.health < 50) {
                 this.effects.createSmoke(tank.mesh.position.clone());
+                if (tank === this.playerTank) {
+                    this.audio.playLowHealth();
+                }
             }
             
             // Tank destroyed
@@ -644,35 +730,53 @@ class Game {
 
         // Update player tank based on key state
         if (this.playerTank && !this.playerTank.isDead) {
+            // Handle movement sounds
+            if (this.keyState.forward || this.keyState.backward || 
+                this.keyState.left || this.keyState.right) {
+                this.audio.playTankMove();
+            } else {
+                this.audio.stopTankMove();
+            }
+
             if (this.keyState.forward) this.playerTank.move('forward');
             if (this.keyState.backward) this.playerTank.move('backward');
             if (this.keyState.left) this.playerTank.move('left');
             if (this.keyState.right) this.playerTank.move('right');
 
-            // Handle bomb planting/defusing
+            // Send tank update to server
+            this.network.sendTankUpdate(
+                this.playerTank.mesh.position,
+                this.playerTank.mesh.rotation.y
+            );
+
+            // Handle bomb planting
             if (this.mode === 'bomb' && this.bomb) {
                 if (this.keyState.plant) {
-                    if (!this.bomb.plantStartTime && this.bomb.startPlanting(this.playerTank)) {
-                        this.showBombAction('Planting Bomb...', 0);
-                    }
-                    const plantProgress = this.bomb.continuePlanting();
-                    if (typeof plantProgress === 'number') {
-                        this.showBombAction('Planting Bomb...', plantProgress);
-                        if (plantProgress >= 1) {
-                            this.hideBombAction();
-                            this.endRound('red');
-                        }
-                    }
-                } else if (this.keyState.defuse) {
-                    if (!this.bomb.defuseStartTime && this.bomb.startDefusing(this.playerTank)) {
-                        this.showBombAction('Defusing Bomb...', 0);
-                    }
-                    const defuseProgress = this.bomb.continueDefusing();
-                    if (typeof defuseProgress === 'number') {
-                        this.showBombAction('Defusing Bomb...', defuseProgress);
-                        if (defuseProgress >= 1) {
-                            this.hideBombAction();
-                            this.endRound('blue');
+                    if (this.playerTank.team === 'red' && this.bomb.carrier === this.playerTank) {
+                        const blueSite = this.teams.blue.bombSite;
+                        if (blueSite) {
+                            const distance = this.playerTank.mesh.position.distanceTo(blueSite);
+                            if (distance < 3) { // Within 3 units of bomb site
+                                if (!this.bomb.isPlanted) {
+                                    if (!this.bomb.plantStartTime) {
+                                        this.bomb.startPlanting(this.playerTank);
+                                        this.showBombAction('Planting Bomb...', 0);
+                                        this.network.sendPlantBomb();
+                                    } else {
+                                        const progress = this.bomb.continuePlanting();
+                                        if (typeof progress === 'number') {
+                                            this.showBombAction('Planting Bomb...', progress);
+                                            if (progress >= 1) {
+                                                this.hideBombAction();
+                                                this.endRound('red');
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                this.bomb.cancelAction();
+                                this.hideBombAction();
+                            }
                         }
                     }
                 } else {
@@ -697,9 +801,19 @@ class Game {
         if (this.mode === 'bomb' && this.bomb) {
             this.bomb.update();
             
-            // Check if bomb has exploded
-            if (this.bomb.isPlanted && this.bomb.explosionTime <= 0) {
-                this.endRound('red');
+            // Update bomb ticking sound
+            if (this.bomb.isPlanted) {
+                const timeLeft = this.bomb.explosionTime - (Date.now() - this.bomb.plantedTime);
+                this.audio.startBombTicking(timeLeft);
+                
+                // Check if bomb has exploded
+                if (timeLeft <= 0) {
+                    this.audio.playBombExplosion();
+                    this.createBombExplosion(this.bomb.mesh.position);
+                    this.endRound('red');
+                }
+            } else {
+                this.audio.stopBombTicking();
             }
         }
 
@@ -787,10 +901,16 @@ class Game {
                 if (this.bomb) {
                     if (this.playerTank.hasBomb) {
                         this.bomb.startPlanting(this.playerTank);
+                        this.network.sendPlantBomb();
                     } else if (this.bomb.isPlanted) {
                         this.bomb.startDefusing(this.playerTank);
+                        this.network.sendDefuseBomb();
                     }
                 }
+                break;
+            case ' ':
+                this.playerTank.fire();
+                this.network.sendFire();
                 break;
         }
     }
@@ -811,5 +931,69 @@ class Game {
                 }
                 break;
         }
+    }
+
+    createBombExplosion(position) {
+        // Create explosion effect
+        const explosionGeometry = new THREE.SphereGeometry(1, 32, 32);
+        const explosionMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff0000,
+            transparent: true,
+            opacity: 1
+        });
+        
+        this.explosionEffect = new THREE.Mesh(explosionGeometry, explosionMaterial);
+        this.explosionEffect.position.copy(position);
+        this.scene.add(this.explosionEffect);
+
+        // Animate explosion
+        const startTime = Date.now();
+        const duration = 1000; // 1 second
+        const maxSize = 10;
+
+        const animateExplosion = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // Expand and fade out
+            const size = 1 + (maxSize - 1) * progress;
+            this.explosionEffect.scale.set(size, size, size);
+            this.explosionEffect.material.opacity = 1 - progress;
+
+            if (progress < 1) {
+                requestAnimationFrame(animateExplosion);
+            } else {
+                this.scene.remove(this.explosionEffect);
+            }
+        };
+
+        animateExplosion();
+    }
+
+    updateTeamBots(team, count) {
+        // Remove existing bots from the team
+        this.tanks = this.tanks.filter(tank => {
+            if (tank.team === team && !tank.id && tank !== this.playerTank) {
+                this.scene.remove(tank.mesh);
+                return false;
+            }
+            return true;
+        });
+
+        // Add new bots if needed
+        for (let i = 0; i < count; i++) {
+            const botPos = this.getSpawnPosition(team);
+            const bot = new Tank(botPos, team);
+            bot.behavior = new BotBehavior(bot, team);
+            bot.behavior.gameInstance = this;
+            this.tanks.push(bot);
+            this.scene.add(bot.mesh);
+            this.teams[team].players.push(bot);
+        }
+    }
+
+    setupPlayerCamera() {
+        this.camera.position.set(0, 10, -20);
+        this.camera.lookAt(this.playerTank.mesh.position);
     }
 } 

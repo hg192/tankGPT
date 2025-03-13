@@ -28,7 +28,11 @@ class Bomb {
     }
 
     assignToRandomRedPlayer() {
-        const redTeam = window.gameInstance.teams.red.players;
+        if (!gameInstance || !gameInstance.teams || !gameInstance.teams.red) {
+            console.warn('Game instance or teams not initialized yet');
+            return;
+        }
+        const redTeam = gameInstance.teams.red.players;
         if (redTeam.length > 0) {
             const randomIndex = Math.floor(Math.random() * redTeam.length);
             this.carrier = redTeam[randomIndex];
@@ -36,7 +40,7 @@ class Bomb {
             this.carrier.hasBomb = true;
             this.mesh.position.copy(this.carrier.mesh.position);
             this.mesh.position.y = 1;
-            window.gameInstance.scene.add(this.mesh);
+            gameInstance.scene.add(this.mesh);
         }
     }
 
@@ -63,12 +67,16 @@ class Bomb {
     }
 
     startPlanting(planter) {
+        if (!gameInstance || !gameInstance.teams || !gameInstance.teams.blue) {
+            console.warn('Game instance or teams not initialized yet');
+            return false;
+        }
         if (planter.team === 'red' && this.carrier === planter) {
-            const blueSite = window.gameInstance.teams.blue.bombSite;
+            const blueSite = gameInstance.teams.blue.bombSite;
             const distance = planter.mesh.position.distanceTo(blueSite);
             if (distance < 5) { // Within bomb site radius
                 this.plantStartTime = Date.now();
-                window.gameInstance.showBombAction('Planting Bomb...', 0);
+                gameInstance.showBombAction('Planting Bomb...', 0);
                 return true;
             }
         }
@@ -79,11 +87,11 @@ class Bomb {
         if (this.plantStartTime) {
             const now = Date.now();
             const progress = (now - this.plantStartTime) / this.plantTime;
-            window.gameInstance.showBombAction('Planting Bomb...', progress);
+            gameInstance.showBombAction('Planting Bomb...', progress);
             
             if (progress >= 1) {
                 this.plant();
-                window.gameInstance.hideBombAction();
+                gameInstance.hideBombAction();
                 return true;
             }
             return progress;
@@ -128,7 +136,7 @@ class Bomb {
             const distance = defuser.mesh.position.distanceTo(this.mesh.position);
             if (distance < 3) { // Within defuse radius
                 this.defuseStartTime = Date.now();
-                window.gameInstance.showBombAction('Defusing Bomb...', 0);
+                gameInstance.showBombAction('Defusing Bomb...', 0);
                 return true;
             }
         }
@@ -139,11 +147,11 @@ class Bomb {
         if (this.defuseStartTime) {
             const now = Date.now();
             const progress = (now - this.defuseStartTime) / this.defuseTime;
-            window.gameInstance.showBombAction('Defusing Bomb...', progress);
+            gameInstance.showBombAction('Defusing Bomb...', progress);
             
             if (progress >= 1) {
                 this.defuse();
-                window.gameInstance.hideBombAction();
+                gameInstance.hideBombAction();
                 return true;
             }
             return progress;
@@ -153,33 +161,33 @@ class Bomb {
 
     defuse() {
         this.isPlanted = false;
-        window.gameInstance.scene.remove(this.mesh);
+        gameInstance.scene.remove(this.mesh);
         // Blue team wins
-        window.gameInstance.endRound('blue');
+        gameInstance.endRound('blue');
     }
 
     explode() {
         if (this.isPlanted) {
             // Create explosion effect
-            window.gameInstance.effects.createExplosion(this.mesh.position.clone(), 5);
+            gameInstance.effects.createExplosion(this.mesh.position.clone(), 5);
             // Damage nearby tanks
-            for (const tank of window.gameInstance.tanks) {
+            for (const tank of gameInstance.tanks) {
                 const distance = tank.mesh.position.distanceTo(this.mesh.position);
                 if (distance < 10) { // Explosion radius
                     const damage = Math.floor(100 * (1 - distance / 10)); // More damage closer to explosion
-                    window.gameInstance.handleTankHit(tank, damage);
+                    gameInstance.handleTankHit(tank, damage);
                 }
             }
             // Red team wins
-            window.gameInstance.endRound('red');
+            gameInstance.endRound('red');
             // Remove bomb
-            window.gameInstance.scene.remove(this.mesh);
+            gameInstance.scene.remove(this.mesh);
         }
     }
 
     cancelAction() {
         this.plantStartTime = null;
         this.defuseStartTime = null;
-        window.gameInstance.hideBombAction();
+        gameInstance.hideBombAction();
     }
 } 

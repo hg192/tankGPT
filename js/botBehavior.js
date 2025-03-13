@@ -38,7 +38,7 @@ class BotBehavior {
     }
 
     update() {
-        if (!window.gameInstance.gameActive || this.tank.isDead) return;
+        if (!gameInstance.gameActive || this.tank.isDead) return;
 
         // Check for enemies and shoot if detected
         this.checkAndShootEnemies();
@@ -124,7 +124,7 @@ class BotBehavior {
     }
 
     attackPattern() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             // If bomb site not initialized, move randomly
             if (!this.targetPosition || this.tank.mesh.position.distanceTo(this.targetPosition) < 2) {
@@ -140,11 +140,11 @@ class BotBehavior {
         if (this.team === 'red') {
             if (distance < 5) {
                 // If close to bomb site, try to plant bomb
-                if (window.gameInstance.bomb && !window.gameInstance.bomb.isPlanted) {
-                    if (!window.gameInstance.bomb.plantStartTime) {
-                        window.gameInstance.bomb.startPlanting(this.tank);
+                if (gameInstance.bomb && !gameInstance.bomb.isPlanted) {
+                    if (!gameInstance.bomb.plantStartTime) {
+                        gameInstance.bomb.startPlanting(this.tank);
                     } else {
-                        window.gameInstance.bomb.continuePlanting();
+                        gameInstance.bomb.continuePlanting();
                     }
                 }
             } else {
@@ -165,11 +165,11 @@ class BotBehavior {
         } else {
             // Blue team behavior remains the same
             if (distance < 5) {
-                if (window.gameInstance.bomb && !window.gameInstance.bomb.isPlanted) {
-                    if (!window.gameInstance.bomb.plantStartTime) {
-                        window.gameInstance.bomb.startPlanting(this.tank);
+                if (gameInstance.bomb && !gameInstance.bomb.isPlanted) {
+                    if (!gameInstance.bomb.plantStartTime) {
+                        gameInstance.bomb.startPlanting(this.tank);
                     } else {
-                        window.gameInstance.bomb.continuePlanting();
+                        gameInstance.bomb.continuePlanting();
                     }
                 }
             } else {
@@ -184,7 +184,7 @@ class BotBehavior {
             return;
         }
 
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             // If bomb site not initialized, move randomly
             if (!this.targetPosition || this.tank.mesh.position.distanceTo(this.targetPosition) < 2) {
@@ -198,11 +198,11 @@ class BotBehavior {
 
         if (distance < 5) {
             // Try to plant the bomb
-            if (window.gameInstance.bomb && !window.gameInstance.bomb.isPlanted) {
-                if (!window.gameInstance.bomb.plantStartTime) {
-                    window.gameInstance.bomb.startPlanting(this.tank);
+            if (gameInstance.bomb && !gameInstance.bomb.isPlanted) {
+                if (!gameInstance.bomb.plantStartTime) {
+                    gameInstance.bomb.startPlanting(this.tank);
                 } else {
-                    window.gameInstance.bomb.continuePlanting();
+                    gameInstance.bomb.continuePlanting();
                 }
             }
         } else {
@@ -229,7 +229,7 @@ class BotBehavior {
     }
 
     defendPattern() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             // If bomb site not initialized, move randomly
             if (!this.targetPosition || this.tank.mesh.position.distanceTo(this.targetPosition) < 2) {
@@ -260,7 +260,7 @@ class BotBehavior {
     }
 
     patrolPattern() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             // If bomb site not initialized, move randomly
             if (!this.targetPosition || this.tank.mesh.position.distanceTo(this.targetPosition) < 2) {
@@ -283,7 +283,7 @@ class BotBehavior {
     }
 
     retreatPattern() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             // If bomb site not initialized, move randomly
             if (!this.targetPosition || this.tank.mesh.position.distanceTo(this.targetPosition) < 2) {
@@ -309,7 +309,7 @@ class BotBehavior {
     }
 
     getDefensivePosition() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             return this.getInitialPosition();
         }
@@ -324,22 +324,29 @@ class BotBehavior {
     }
 
     getPatrolPosition() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
-        if (!bombSite) {
+        if (!gameInstance || !gameInstance.teams || !gameInstance.teams[this.team]) {
             return this.getInitialPosition();
         }
 
-        const angle = Math.random() * Math.PI * 2;
-        const radius = 10 + Math.random() * 10;
-        return new THREE.Vector3(
-            bombSite.x + Math.cos(angle) * radius,
-            1,
-            bombSite.z + Math.sin(angle) * radius
-        );
+        const teamArea = this.team === 'red' ? {
+            x: -35,
+            z: -35,
+            width: 20,
+            depth: 20
+        } : {
+            x: 35,
+            z: 35,
+            width: 20,
+            depth: 20
+        };
+
+        const randomX = teamArea.x + (Math.random() - 0.5) * teamArea.width;
+        const randomZ = teamArea.z + (Math.random() - 0.5) * teamArea.depth;
+        return new THREE.Vector3(randomX, 1, randomZ);
     }
 
     getRetreatPosition() {
-        const bombSite = window.gameInstance.teams.blue.bombSite;
+        const bombSite = gameInstance.teams.blue.bombSite;
         if (!bombSite) {
             return this.getInitialPosition();
         }
@@ -366,7 +373,7 @@ class BotBehavior {
         let nearestTeammate = null;
         let nearestDistance = Infinity;
 
-        for (const tank of window.gameInstance.tanks) {
+        for (const tank of gameInstance.tanks) {
             if (tank.team === this.team && tank.hasBomb && !tank.isDead) {
                 const distance = this.tank.mesh.position.distanceTo(tank.mesh.position);
                 if (distance < nearestDistance) {
@@ -438,7 +445,7 @@ class BotBehavior {
         let nearestEnemy = null;
         let nearestDistance = Infinity;
 
-        for (const tank of window.gameInstance.tanks) {
+        for (const tank of gameInstance.tanks) {
             if (tank.team !== this.team && !tank.isDead) {
                 const distance = this.tank.mesh.position.distanceTo(tank.mesh.position);
                 if (distance < nearestDistance) {

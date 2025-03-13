@@ -48,7 +48,7 @@ class Bullet {
 
     checkCollisions() {
         // Check collision with tanks
-        for (const tank of window.gameInstance.tanks) {
+        for (const tank of gameInstance.tanks) {
             if (tank.team !== this.team && !tank.isDead) {
                 const distance = this.mesh.position.distanceTo(tank.mesh.position);
                 if (distance < 1.5) {
@@ -60,8 +60,8 @@ class Bullet {
         }
 
         // Check collision with walls and obstacles
-        if (window.gameInstance.map.checkCollision(this.mesh.position, 0.1)) {
-            window.gameInstance.effects.createHitSpark(this.mesh.position.clone());
+        if (gameInstance.map.checkCollision(this.mesh.position, 0.1)) {
+            gameInstance.effects.createHitSpark(this.mesh.position.clone());
             this.destroy();
         }
     }
@@ -70,18 +70,18 @@ class Bullet {
         if (this.isDestroyed) return;
         
         this.isDestroyed = true;
-        window.gameInstance.scene.remove(this.mesh);
+        gameInstance.scene.remove(this.mesh);
         
-        const index = window.gameInstance.bullets.indexOf(this);
+        const index = gameInstance.bullets.indexOf(this);
         if (index > -1) {
-            window.gameInstance.bullets.splice(index, 1);
+            gameInstance.bullets.splice(index, 1);
         }
     }
 }
 
 // Update all bullets
 function updateBullets() {
-    window.gameInstance.bullets.forEach(bullet => {
+    gameInstance.bullets.forEach(bullet => {
         bullet.update();
     });
 }
@@ -92,6 +92,6 @@ function addBullet(bulletData) {
         bulletData.tank,
         bulletData.team
     );
-    window.gameInstance.bullets.push(bullet);
-    window.gameInstance.scene.add(bullet.mesh);
+    gameInstance.bullets.push(bullet);
+    gameInstance.scene.add(bullet.mesh);
 } 

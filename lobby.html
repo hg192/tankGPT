@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tank Game - Lobby</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: white;
+        }
+
+        .lobby-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        .teams-container {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .team {
+            flex: 1;
+            margin: 0 10px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #333;
+        }
+
+        .team.red {
+            border: 2px solid #ff4444;
+        }
+
+        .team.blue {
+            border: 2px solid #4444ff;
+        }
+
+        .team h2 {
+            margin: 0 0 10px 0;
+            text-align: center;
+        }
+
+        .player-list {
+            min-height: 200px;
+            background-color: #222;
+            border-radius: 5px;
+            padding: 10px;
+        }
+
+        .player-item {
+            padding: 8px;
+            margin: 5px 0;
+            background-color: #444;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .player-item.ready {
+            background-color: #2a2a2a;
+            border-left: 3px solid #4CAF50;
+        }
+
+        .player-item.waiting {
+            background-color: #2a2a2a;
+            border-left: 3px solid #ff9800;
+        }
+
+        .status {
+            font-size: 0.8em;
+            color: #888;
+        }
+
+        .ready-status {
+            color: #4CAF50;
+        }
+
+        .waiting-status {
+            color: #ff9800;
+        }
+
+        .game-status {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #333;
+            border-radius: 5px;
+        }
+
+        .countdown {
+            font-size: 24px;
+            color: #ff9800;
+            margin: 10px 0;
+        }
+
+        .start-button {
+            display: none;
+            margin: 20px auto;
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .start-button:hover {
+            background-color: #45a049;
+        }
+
+        .start-button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="lobby-container">
+        <h1 style="text-align: center;">Tank Game Lobby</h1>
+        
+        <div class="teams-container">
+            <div class="team red">
+                <h2>Red Team</h2>
+                <div class="player-list" id="red-team-list">
+                    <!-- Players will be added here -->
+                </div>
+            </div>
+            
+            <div class="team blue">
+                <h2>Blue Team</h2>
+                <div class="player-list" id="blue-team-list">
+                    <!-- Players will be added here -->
+                </div>
+            </div>
+        </div>
+
+        <div class="game-status" id="game-status">
+            <div id="status-message">Waiting for players...</div>
+            <div class="countdown" id="countdown"></div>
+            <button class="start-button" id="start-button">Start Game</button>
+        </div>
+    </div>
+
+    <script>
+        class LobbyManager {
+            constructor() {
+                this.ws = null;
+                this.playerId = null;
+                this.playerName = '';
+                this.selectedTeam = null;
+                this.players = {
+                    red: [],
+                    blue: []
+                };
+                this.gameStarting = false;
+                this.countdownInterval = null;
+
+                this.connect();
+                this.setupEventListeners();
+            }
+
+            connect() {
+                this.ws = new WebSocket('ws://localhost:8080');
+                
+                this.ws.onopen = () => {
+                    console.log('Connected to lobby server');
+                    this.joinLobby();
+                };
+
+                this.ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                };
+
+                this.ws.onclose = () => {
+                    console.log('Disconnected from lobby server');
+                };
+            }
+
+            setupEventListeners() {
+                document.getElementById('start-button').addEventListener('click', () => {
+                    if (this.canStartGame()) {
+                        this.startGame();
+                    }
+                });
+            }
+
+            joinLobby() {
+                // Get player name from localStorage or prompt
+                this.playerName = localStorage.getItem('playerName') || prompt('Enter your name:');
+                if (this.playerName) {
+                    localStorage.setItem('playerName', this.playerName);
+                    this.ws.send(JSON.stringify({
+                        type: 'join_lobby',
+                        playerName: this.playerName
+                    }));
+                }
+            }
+
+            handleMessage(data) {
+                switch (data.type) {
+                    case 'lobby_state':
+                        this.updateLobbyState(data.state);
+                        break;
+                    case 'game_start':
+                        this.handleGameStart(data);
+                        break;
+                }
+            }
+
+            updateLobbyState(state) {
+                this.players = state.players;
+                this.playerId = state.playerId;
+                this.updatePlayerLists();
+                this.updateGameStatus();
+            }
+
+            updatePlayerLists() {
+                const redList = document.getElementById('red-team-list');
+                const blueList = document.getElementById('blue-team-list');
+                
+                redList.innerHTML = '';
+                blueList.innerHTML = '';
+
+                this.players.red.forEach(player => {
+                    redList.appendChild(this.createPlayerElement(player));
+                });
+
+                this.players.blue.forEach(player => {
+                    blueList.appendChild(this.createPlayerElement(player));
+                });
+            }
+
+            createPlayerElement(player) {
+                const div = document.createElement('div');
+                div.className = `player-item ${player.ready ? 'ready' : 'waiting'}`;
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = player.name;
+                
+                const statusSpan = document.createElement('span');
+                statusSpan.className = `status ${player.ready ? 'ready-status' : 'waiting-status'}`;
+                statusSpan.textContent = player.ready ? 'Ready' : 'Waiting...';
+                
+                div.appendChild(nameSpan);
+                div.appendChild(statusSpan);
+                
+                return div;
+            }
+
+            updateGameStatus() {
+                const statusMessage = document.getElementById('status-message');
+                const startButton = document.getElementById('start-button');
+                const countdown = document.getElementById('countdown');
+
+                if (this.gameStarting) {
+                    statusMessage.textContent = 'Game starting...';
+                    startButton.style.display = 'none';
+                    countdown.style.display = 'block';
+                } else if (this.canStartGame()) {
+                    statusMessage.textContent = 'All players ready!';
+                    startButton.style.display = 'block';
+                    countdown.style.display = 'none';
+                } else {
+                    statusMessage.textContent = 'Waiting for players...';
+                    startButton.style.display = 'none';
+                    countdown.style.display = 'none';
+                }
+            }
+
+            canStartGame() {
+                return this.players.red.length > 0 && 
+                       this.players.blue.length > 0 &&
+                       this.players.red.every(p => p.ready) &&
+                       this.players.blue.every(p => p.ready);
+            }
+
+            startGame() {
+                this.ws.send(JSON.stringify({
+                    type: 'start_game'
+                }));
+                this.startCountdown();
+            }
+
+            startCountdown() {
+                let timeLeft = 5;
+                const countdown = document.getElementById('countdown');
+                this.gameStarting = true;
+                this.updateGameStatus();
+
+                this.countdownInterval = setInterval(() => {
+                    countdown.textContent = timeLeft;
+                    timeLeft--;
+
+                    if (timeLeft < 0) {
+                        clearInterval(this.countdownInterval);
+                        window.location.href = 'index.html';
+                    }
+                }, 1000);
+            }
+
+            handleGameStart(data) {
+                this.startCountdown();
+            }
+        }
+
+        // Initialize lobby when page loads
+        window.addEventListener('load', () => {
+            new LobbyManager();
+        });
+    </script>
+</body>
+</html> 

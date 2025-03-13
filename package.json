@@ -1,13 +1,14 @@
 {
-  "name": "tank-battle-3d",
+  "name": "tank-game",
   "version": "1.0.0",
-  "description": "A 3D tank battle game",
+  "description": "3D Tank Game",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.17.1",
-    "socket.io": "^4.0.1"
+    "socket.io": "^4.5.1",
+    "http": "^0.0.1-security"
   }
-} 
+}

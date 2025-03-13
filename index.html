@@ -25,6 +25,52 @@
             color: #fff;
             z-index: 100;
         }
+        #name-popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            color: #fff;
+            z-index: 200;
+            display: none;
+        }
+        #name-popup input {
+            background: #333;
+            border: 2px solid #666;
+            color: #fff;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: 'Press Start 2P', cursive;
+            width: 200px;
+        }
+        #name-popup button {
+            background: #4CAF50;
+            border: none;
+            color: #fff;
+            padding: 10px 20px;
+            margin: 10px;
+            font-family: 'Press Start 2P', cursive;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        #name-popup button:hover {
+            background: #45a049;
+        }
+        .player-name {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 12px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            white-space: nowrap;
+            pointer-events: none;
+        }
         button {
             background: #333;
             border: 2px solid #666;
@@ -77,39 +123,250 @@
             font-size: 12px;
             z-index: 100;
         }
+        #team-select {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            z-index: 1000;
+        }
+        .team-button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 18px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            color: white;
+        }
+        #red-team {
+            background-color: #ff4444;
+        }
+        #blue-team {
+            background-color: #4444ff;
+        }
+        #ready-button {
+            display: none;
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #ready-button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+        }
+        #game-ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            z-index: 100;
+        }
+        #score {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            z-index: 100;
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="game-container">
+        <div id="name-popup">
+            <h2>Enter Your Name</h2>
+            <input type="text" id="player-name" maxlength="15" placeholder="Your name">
+            <button onclick="startGame()">Start Game</button>
+        </div>
         <div id="menu">
             <h1>Battle City 3D</h1>
-            <button onclick="window.gameInstance.start('bomb')">5v5 Bomb Mode</button>
+            <button onclick="showNamePopup()">5v5 Bomb Mode</button>
         </div>
         <div id="crosshair"></div>
         <div id="controls">
             WASD - Move | SPACE - Fire | F - Plant/Defuse Bomb
+        </div>
+        <div id="team-select">
+            <h2>Select Your Team</h2>
+            <button id="red-team" class="team-button">Red Team</button>
+            <button id="blue-team" class="team-button">Blue Team</button>
+            <button id="ready-button">Ready</button>
+        </div>
+        <div id="game-ui">
+            <div>Health: <span id="health">100</span></div>
+            <div>Ammo: <span id="ammo">30</span></div>
+        </div>
+        <div id="score">
+            Red: <span id="red-score">0</span> - Blue: <span id="blue-score">0</span>
         </div>
     </div>
 
     <!-- Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
     
     <!-- Game Scripts -->
     <script src="js/textureGenerator.js"></script>
     <script src="js/effects.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/bullet.js"></script>
     <script src="js/bomb.js"></script>
     <script src="js/tank.js"></script>
     <script src="js/botBehavior.js"></script>
     <script src="js/map.js"></script>
+    <script src="js/network.js"></script>
     <script src="js/game.js"></script>
-    <script>
-        // Initialize game instance after all scripts are loaded
-        window.gameInstance = new Game();
-    </script>
     <script src="js/main.js"></script>
+    <script>
+        let playerName = '';
+        let socket;
+        let selectedTeam = null;
+        let isReady = false;
+        
+        function showNamePopup() {
+            document.getElementById('name-popup').style.display = 'block';
+            document.getElementById('menu').style.display = 'none';
+        }
+
+        function startGame() {
+            const nameInput = document.getElementById('player-name');
+            playerName = nameInput.value.trim();
+            
+            if (playerName) {
+                document.getElementById('name-popup').style.display = 'none';
+                if (!gameInstance) {
+                    gameInstance = new Game();
+                }
+                gameInstance.start('bomb', playerName);
+            } else {
+                alert('Please enter your name!');
+            }
+        }
+
+        function connectToServer() {
+            console.log('Connecting to server...');
+            socket = io('http://localhost:8080');
+
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                // Get player name from localStorage or prompt
+                const playerName = localStorage.getItem('playerName') || prompt('Enter your name:');
+                if (playerName) {
+                    localStorage.setItem('playerName', playerName);
+                    console.log('Joining lobby with name:', playerName);
+                    socket.emit('join_lobby', {
+                        playerName: playerName
+                    });
+                }
+            });
+
+            socket.on('lobby_state', (data) => {
+                console.log('Received lobby state:', data);
+                handleLobbyState(data.state);
+            });
+
+            socket.on('game_start', (data) => {
+                console.log('Game starting:', data);
+                handleGameStart(data.gameState);
+            });
+
+            socket.on('game_state', (data) => {
+                console.log('Received game state:', data);
+                handleGameState(data.state);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server');
+            });
+
+            socket.on('error', (error) => {
+                console.error('Socket error:', error);
+            });
+        }
+
+        function handleLobbyState(state) {
+            console.log('Handling lobby state:', state);
+            // Update UI based on lobby state
+            const redTeamButton = document.getElementById('red-team');
+            const blueTeamButton = document.getElementById('blue-team');
+            const readyButton = document.getElementById('ready-button');
+
+            // Disable team buttons if player is already in a team
+            if (selectedTeam) {
+                redTeamButton.disabled = selectedTeam === 'red';
+                blueTeamButton.disabled = selectedTeam === 'blue';
+            }
+
+            // Show/hide ready button based on team selection
+            readyButton.style.display = selectedTeam ? 'block' : 'none';
+            readyButton.disabled = isReady;
+        }
+
+        function handleGameStart(gameState) {
+            // Hide team selection UI
+            document.getElementById('team-select').style.display = 'none';
+            
+            // Initialize game
+            gameInstance = new Game();
+            gameInstance.initialize(gameState);
+        }
+
+        function handleGameState(state) {
+            if (gameInstance) {
+                gameInstance.updateState(state);
+            }
+        }
+
+        // Event listeners for team selection and ready button
+        document.getElementById('red-team').addEventListener('click', () => {
+            console.log('Red team button clicked');
+            if (!selectedTeam) {
+                selectedTeam = 'red';
+                console.log('Emitting select_team event for red team');
+                socket.emit('select_team', {
+                    team: 'red'
+                });
+            }
+        });
+
+        document.getElementById('blue-team').addEventListener('click', () => {
+            console.log('Blue team button clicked');
+            if (!selectedTeam) {
+                selectedTeam = 'blue';
+                console.log('Emitting select_team event for blue team');
+                socket.emit('select_team', {
+                    team: 'blue'
+                });
+            }
+        });
+
+        document.getElementById('ready-button').addEventListener('click', () => {
+            console.log('Ready button clicked');
+            if (selectedTeam && !isReady) {
+                isReady = true;
+                console.log('Emitting player_ready event');
+                socket.emit('player_ready');
+            }
+        });
+
+        // Connect to server when page loads
+        window.addEventListener('load', connectToServer);
+    </script>
 </body>
 </html>
